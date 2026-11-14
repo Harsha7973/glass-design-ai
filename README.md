@@ -1,3 +1,4 @@
+
 # GLASS DESIGN AI
 
 Autonomous multi-agent app that extracts the outline of the main decorative
@@ -84,3 +85,6 @@ If you see `CERTIFICATE_VERIFY_FAILED`, your network re-signs HTTPS traffic. Run
 `pip install truststore` (already in requirements.txt). The backend then trusts the
 Windows certificate store. If that is not enough, set `GROQ_CA_BUNDLE` in `backend\.env`
 to your company's root certificate file. Certificate checking is never turned off.
+=======
+# glass-design-ai
+
