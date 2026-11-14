@@ -1,0 +1,28 @@
+# Secrets
+.env
+backend/.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Runtime data
+backend/uploads/*
+backend/outputs/*
+!backend/uploads/.gitkeep
+!backend/outputs/.gitkeep
+
+# Model weights
+backend/models/*.pt
+backend/models/*.pth
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
