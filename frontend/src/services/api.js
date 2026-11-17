@@ -42,3 +42,10 @@ export async function getStatus(jobId) {
   if (!response.ok) throw new Error(await parseError(response))
   return response.json()
 }
+
+// Result files are served by the backend as "/result/<job>/<name>"; the dev proxy needs "/api" in front.
+export function resultUrl(path) {
+  return `${API_BASE}${path}`
+}
+
+export const FINISHED = ['completed', 'needs_review', 'failed']

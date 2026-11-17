@@ -12,6 +12,7 @@ def client(tmp_path, monkeypatch):
     """Test client that writes uploads/outputs to a temp dir, not the real one."""
     monkeypatch.setattr(settings, "upload_dir", tmp_path / "uploads")
     monkeypatch.setattr(settings, "output_dir", tmp_path / "outputs")
+    monkeypatch.setattr(settings, "auto_process", False)  # API tests check upload handling only
     from main import app
 
     with TestClient(app) as c:

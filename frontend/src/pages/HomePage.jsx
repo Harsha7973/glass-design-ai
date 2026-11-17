@@ -3,9 +3,10 @@ import Header from '../components/Header.jsx'
 import UploadZone from '../components/UploadZone.jsx'
 import ImagePreview from '../components/ImagePreview.jsx'
 import StatusPanel from '../components/StatusPanel.jsx'
-import { ALLOWED_TYPES, MAX_UPLOAD_MB, checkHealth, getStatus, uploadImage } from '../services/api.js'
+import ResultView from '../components/ResultView.jsx'
+import { ALLOWED_TYPES, FINISHED, MAX_UPLOAD_MB, checkHealth, getStatus, uploadImage } from '../services/api.js'
 
-// phase: 'idle' | 'uploading' | 'uploaded' | 'error'
+// phase: 'idle' | 'uploading' | 'processing' | 'done' | 'error'
 export default function HomePage() {
   const [phase, setPhase] = useState('idle')
   const [previewUrl, setPreviewUrl] = useState(null)
@@ -14,6 +15,7 @@ export default function HomePage() {
   const [error, setError] = useState('')
   const [backendUp, setBackendUp] = useState(null) // null = checking
   const urlRef = useRef(null)
+  const pollRef = useRef(null)
 
   // Initial check: state is set only after the async call resolves.
   useEffect(() => {
@@ -32,7 +34,35 @@ export default function HomePage() {
   }
 
   // Free the blob URL when the component unmounts.
-  useEffect(() => () => urlRef.current && URL.revokeObjectURL(urlRef.current), [])
+  useEffect(
+    () => () => {
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current)
+      clearTimeout(pollRef.current)
+    },
+    [],
+  )
+
+  // Ask the backend for the real job state until it reports a final status.
+  const poll = (jobId, failures = 0) => {
+    pollRef.current = setTimeout(async () => {
+      try {
+        const current = await getStatus(jobId)
+        setJob(current)
+        if (FINISHED.includes(current.status)) {
+          setPhase('done')
+        } else {
+          poll(jobId)
+        }
+      } catch (err) {
+        if (failures >= 4) {
+          setError(`Lost contact with the backend: ${err.message}`)
+          setPhase('error')
+        } else {
+          poll(jobId, failures + 1)
+        }
+      }
+    }, 1500)
+  }
 
   const setPreview = (file) => {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current)
@@ -64,8 +94,13 @@ export default function HomePage() {
       const created = await uploadImage(file)
       const current = await getStatus(created.job_id) // real status from the backend
       setJob(current)
-      setPhase('uploaded')
       setBackendUp(true)
+      if (FINISHED.includes(current.status)) {
+        setPhase('done')
+      } else {
+        setPhase('processing')
+        poll(created.job_id)
+      }
     } catch (err) {
       setError(err.message)
       setPhase('error')
@@ -73,6 +108,7 @@ export default function HomePage() {
   }
 
   const reset = () => {
+    clearTimeout(pollRef.current)
     setPreview(null)
     setFileName('')
     setJob(null)
@@ -102,10 +138,12 @@ export default function HomePage() {
 
         <StatusPanel phase={phase} job={job} error={error} />
 
+        {phase === 'done' && job?.result && job.status !== 'failed' && <ResultView result={job.result} />}
+
         {phase !== 'idle' && (
           <div className="actions">
             <button type="button" className="btn" onClick={reset} disabled={busy}>
-              Reset
+              {phase === 'processing' ? 'Cancel view' : 'Start over'}
             </button>
           </div>
         )}

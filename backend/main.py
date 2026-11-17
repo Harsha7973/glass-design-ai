@@ -1,16 +1,18 @@
 """FastAPI entrypoint.
 
-Endpoints so far: GET /health, POST /process (upload + validation),
-GET /status/{job_id}. The AI pipeline is wired in during later phases.
+Endpoints: GET /health, POST /process (validate, save, start the pipeline in the
+background), GET /status/{job_id} (real step messages and the result summary),
+GET /result/{job_id}/{name} (the generated PNGs). PNG/SVG export arrives in Phase 9.
 """
 import logging
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
+from agents.orchestrator import PUBLIC_FILES, Orchestrator
 from config import settings
 from schemas.job import HealthResponse, JobStatus
 from services import image_service
@@ -22,7 +24,11 @@ from utils.logging_setup import setup_logging
 setup_logging(settings.log_level)
 logger = logging.getLogger("glass_design_ai")
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
+
+
+def build_orchestrator() -> Orchestrator:
+    return Orchestrator()  # tests replace this to avoid real Groq calls
 
 
 @asynccontextmanager
@@ -69,12 +75,10 @@ def health() -> HealthResponse:
 
 
 @app.post("/process", response_model=JobStatus, status_code=202)
-async def process(file: UploadFile = File(...)) -> JobStatus:
-    """Validate and store an uploaded image, returning a job id.
+async def process(background: BackgroundTasks, file: UploadFile = File(...)) -> JobStatus:
+    """Validate and store an uploaded image, then process it in the background.
 
-    Phase 2: the image is validated and saved only. Processing starts here
-    once the agents exist.
-    """
+    Poll GET /status/{job_id} for the real progress."""
     image_service.check_declared_type(file.filename, file.content_type)
     data = await image_service.read_limited(file)
     info = image_service.validate_image_bytes(data)
@@ -83,6 +87,8 @@ async def process(file: UploadFile = File(...)) -> JobStatus:
     image_service.save_upload(job_id, data, info)
     job = job_store.create(job_id, info.format, info.width, info.height)
     logger.info("Job %s accepted: %s %dx%d, %d bytes", job_id, info.format, info.width, info.height, len(data))
+    if settings.auto_process:
+        background.add_task(build_orchestrator().run, job_id)
     return job
 
 
@@ -92,3 +98,15 @@ def status(job_id: str) -> JobStatus:
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
     return job
+
+
+@app.get("/result/{job_id}/{name}")
+def result_file(job_id: str, name: str) -> FileResponse:
+    """Serve one generated PNG. Only known file names are allowed, and the job id must
+    be a job this server created, so no other path can be reached."""
+    if name not in PUBLIC_FILES or job_store.get(job_id) is None:
+        raise HTTPException(status_code=404, detail="File not found.")
+    path = settings.output_dir / job_id / name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
